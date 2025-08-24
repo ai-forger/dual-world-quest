@@ -5,7 +5,7 @@ class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        this.gameState = 'start'; // start, playing, gameOver, victory
+        this.gameState = 'start'; // start, playing, gameOver, victory, transitioning
 
         // Game settings
         this.currentLevel = 1;
@@ -18,6 +18,16 @@ class Game {
         this.canvasWidth = 800;
         this.canvasHeight = 600;
         this.worldHeight = this.canvasHeight / 2;
+
+        // Transition animation properties
+        this.transitionState = {
+            active: false,
+            progress: 0,
+            duration: 2000, // 2 seconds
+            startTime: 0,
+            portalParticles: [],
+            screenFlash: 0
+        };
 
         // Initialize game objects
         this.initPlayers();
@@ -177,6 +187,37 @@ class Game {
         ];
 
         this.currentLevelData = this.levels[this.currentLevel - 1];
+
+        // Initialize particles
+        this.particles = [];
+        this.stars = [];
+        this.initParticles();
+    }
+
+    initParticles() {
+        // Create background stars
+        for (let i = 0; i < 50; i++) {
+            this.stars.push({
+                x: Math.random() * this.canvasWidth,
+                y: Math.random() * this.canvasHeight,
+                size: Math.random() * 2 + 1,
+                speed: Math.random() * 0.5 + 0.1,
+                twinkle: Math.random() * Math.PI * 2
+            });
+        }
+
+        // Create floating particles
+        for (let i = 0; i < 30; i++) {
+            this.particles.push({
+                x: Math.random() * this.canvasWidth,
+                y: Math.random() * this.canvasHeight,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                size: Math.random() * 3 + 1,
+                life: Math.random() * 100 + 50,
+                color: ['#00ffff', '#ff00ff', '#ffff00', '#ff8800'][Math.floor(Math.random() * 4)]
+            });
+        }
     }
 
     initControls() {
@@ -303,6 +344,55 @@ class Game {
         this.updatePlayers();
         this.checkCollisions();
         this.checkWinCondition();
+        this.updateTransition();
+    }
+
+    updateTransition() {
+        if (!this.transitionState.active) return;
+
+        const currentTime = Date.now();
+        const elapsed = currentTime - this.transitionState.startTime;
+        this.transitionState.progress = Math.min(elapsed / this.transitionState.duration, 1);
+
+        // Update portal particles
+        for (let i = this.transitionState.portalParticles.length - 1; i >= 0; i--) {
+            const particle = this.transitionState.portalParticles[i];
+            particle.x += particle.vx;
+            particle.y += particle.vy;
+            particle.life--;
+
+            if (particle.life <= 0) {
+                this.transitionState.portalParticles.splice(i, 1);
+            }
+        }
+
+        // Update screen flash
+        if (this.transitionState.progress < 0.3) {
+            this.transitionState.screenFlash = this.transitionState.progress / 0.3;
+        } else if (this.transitionState.progress > 0.7) {
+            this.transitionState.screenFlash = (1 - this.transitionState.progress) / 0.3;
+        } else {
+            this.transitionState.screenFlash = 1;
+        }
+
+        // Complete transition
+        if (this.transitionState.progress >= 1) {
+            this.completeLevelTransition();
+        }
+    }
+
+    completeLevelTransition() {
+        this.transitionState.active = false;
+
+        if (this.currentLevel < this.levels.length) {
+            this.currentLevel++;
+            this.currentLevelData = this.levels[this.currentLevel - 1];
+            this.resetLevel();
+            this.updateUI();
+        } else {
+            // Game completed
+            this.victory();
+        }
     }
 
     handleInput() {
@@ -411,8 +501,41 @@ class Game {
         const player1AtExit = this.checkCollision(this.player1, exit1);
         const player2AtExit = this.checkCollision(this.player2, exit2);
 
-        if (player1AtExit && player2AtExit) {
-            this.victory();
+        if (player1AtExit && player2AtExit && !this.transitionState.active) {
+            this.startLevelTransition();
+        }
+    }
+
+    startLevelTransition() {
+        this.transitionState.active = true;
+        this.transitionState.startTime = Date.now();
+        this.transitionState.progress = 0;
+        this.transitionState.portalParticles = [];
+        this.transitionState.screenFlash = 0;
+
+        // Create explosion of portal particles
+        for (let i = 0; i < 50; i++) {
+            this.transitionState.portalParticles.push({
+                x: this.player1.x + this.player1.width / 2,
+                y: this.player1.y + this.player1.height / 2,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.5) * 8,
+                life: Math.random() * 100 + 50,
+                color: ['#ffff00', '#ff00ff', '#00ffff', '#ffffff'][Math.floor(Math.random() * 4)],
+                size: Math.random() * 4 + 2
+            });
+        }
+
+        for (let i = 0; i < 50; i++) {
+            this.transitionState.portalParticles.push({
+                x: this.player2.x + this.player2.width / 2,
+                y: this.player2.y + this.player2.height / 2,
+                vx: (Math.random() - 0.5) * 8,
+                vy: (Math.random() - 0.5) * 8,
+                life: Math.random() * 100 + 50,
+                color: ['#ffff00', '#ff00ff', '#00ffff', '#ffffff'][Math.floor(Math.random() * 4)],
+                size: Math.random() * 4 + 2
+            });
         }
     }
 
@@ -437,26 +560,39 @@ class Game {
     }
 
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = '#000';
+        // Clear canvas with gradient background
+        const gradient = this.ctx.createLinearGradient(0, 0, 0, this.canvasHeight);
+        gradient.addColorStop(0, '#0a0a2a');   // Dark blue at top
+        gradient.addColorStop(0.5, '#1a1a3a'); // Mid blue at center
+        gradient.addColorStop(1, '#2a0a2a');   // Dark purple at bottom
+        this.ctx.fillStyle = gradient;
         this.ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
 
-        // Draw world separator line
+        // Draw animated background stars
+        this.drawBackgroundStars();
+
+        // Draw world separator with glow effect
+        this.ctx.shadowColor = '#00ff00';
+        this.ctx.shadowBlur = 10;
         this.ctx.strokeStyle = '#00ff00';
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = 3;
         this.ctx.beginPath();
         this.ctx.moveTo(0, this.worldHeight);
         this.ctx.lineTo(this.canvasWidth, this.worldHeight);
         this.ctx.stroke();
+        this.ctx.shadowBlur = 0;
 
-        // Draw platforms
+        // Draw platforms with enhanced visuals
         for (let platform of this.currentLevelData.platforms) {
-            this.ctx.fillStyle = platform.color;
-
-            // Add glitch effect to bottom world platforms
             if (platform.y >= this.worldHeight) {
-                // Random glitch offset for bottom world platforms
+                // Bottom world platforms (glitched)
                 const glitchOffset = Math.random() > 0.9 ? (Math.random() - 0.5) * 4 : 0;
+
+                // Draw platform with gradient
+                const platformGradient = this.ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+                platformGradient.addColorStop(0, '#ff00ff');
+                platformGradient.addColorStop(1, '#800080');
+                this.ctx.fillStyle = platformGradient;
                 this.ctx.fillRect(
                     platform.x + glitchOffset,
                     platform.y,
@@ -464,37 +600,75 @@ class Game {
                     platform.height
                 );
 
-                // Add glitch scanlines to bottom world platforms
+                // Add glow effect
+                this.ctx.shadowColor = '#ff00ff';
+                this.ctx.shadowBlur = 5;
+                this.ctx.fillRect(
+                    platform.x + glitchOffset,
+                    platform.y,
+                    platform.width,
+                    platform.height
+                );
+                this.ctx.shadowBlur = 0;
+
+                // Add glitch scanlines
                 if (Math.random() > 0.8) {
-                    this.ctx.fillStyle = 'rgba(0, 255, 255, 0.4)';
+                    this.ctx.fillStyle = 'rgba(0, 255, 255, 0.6)';
                     this.ctx.fillRect(
                         platform.x,
                         platform.y + Math.random() * platform.height,
                         platform.width,
-                        1
+                        2
                     );
-                    this.ctx.fillStyle = platform.color; // Reset color
                 }
             } else {
-                // Normal world platforms (no glitch)
+                // Top world platforms (normal)
+                const platformGradient = this.ctx.createLinearGradient(platform.x, platform.y, platform.x, platform.y + platform.height);
+                platformGradient.addColorStop(0, '#00ff88');
+                platformGradient.addColorStop(1, '#008844');
+                this.ctx.fillStyle = platformGradient;
                 this.ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+
+                // Add glow effect
+                this.ctx.shadowColor = '#00ff88';
+                this.ctx.shadowBlur = 5;
+                this.ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                this.ctx.shadowBlur = 0;
+
+                // Add highlight
+                this.ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                this.ctx.fillRect(platform.x, platform.y, platform.width, 3);
             }
         }
 
-        // Draw obstacles
+        // Draw obstacles with enhanced visuals
         for (let obstacle of this.currentLevelData.obstacles) {
-            this.ctx.fillStyle = obstacle.color;
-
-            // Add glitch effect to bottom world obstacles
             if (obstacle.y >= this.worldHeight) {
-                // Random glitch offset for bottom world obstacles
+                // Bottom world obstacles (glitched)
                 const glitchOffset = Math.random() > 0.85 ? (Math.random() - 0.5) * 6 : 0;
+
+                // Draw obstacle with gradient
+                const obstacleGradient = this.ctx.createLinearGradient(obstacle.x, obstacle.y, obstacle.x, obstacle.y + obstacle.height);
+                obstacleGradient.addColorStop(0, '#ff4444');
+                obstacleGradient.addColorStop(1, '#880000');
+                this.ctx.fillStyle = obstacleGradient;
                 this.ctx.fillRect(
                     obstacle.x + glitchOffset,
                     obstacle.y,
                     obstacle.width,
                     obstacle.height
                 );
+
+                // Add glow effect
+                this.ctx.shadowColor = '#ff4444';
+                this.ctx.shadowBlur = 8;
+                this.ctx.fillRect(
+                    obstacle.x + glitchOffset,
+                    obstacle.y,
+                    obstacle.width,
+                    obstacle.height
+                );
+                this.ctx.shadowBlur = 0;
 
                 // Add glitch color flicker
                 if (Math.random() > 0.9) {
@@ -505,47 +679,218 @@ class Game {
                         obstacle.width,
                         obstacle.height
                     );
-                    this.ctx.fillStyle = obstacle.color; // Reset color
                 }
             } else {
-                // Normal world obstacles (no glitch)
+                // Top world obstacles (normal)
+                const obstacleGradient = this.ctx.createLinearGradient(obstacle.x, obstacle.y, obstacle.x, obstacle.y + obstacle.height);
+                obstacleGradient.addColorStop(0, '#ff6666');
+                obstacleGradient.addColorStop(1, '#cc0000');
+                this.ctx.fillStyle = obstacleGradient;
+                this.ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+
+                // Add glow effect
+                this.ctx.shadowColor = '#ff6666';
+                this.ctx.shadowBlur = 8;
+                this.ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                this.ctx.shadowBlur = 0;
+
+                // Add pulsing effect
+                const pulse = Math.sin(Date.now() * 0.01) * 0.3 + 0.7;
+                this.ctx.fillStyle = `rgba(255, 255, 255, ${pulse * 0.5})`;
                 this.ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
             }
         }
 
-        // Draw exits
+        // Draw exits with enhanced visuals
         const exit1 = this.currentLevelData.exit1;
         const exit2 = this.currentLevelData.exit2;
+        const time = Date.now() * 0.001;
 
-        // Top world exit (green)
-        this.ctx.fillStyle = exit1.color;
-        this.ctx.fillRect(exit1.x, exit1.y, exit1.width, exit1.height);
+        // Top world exit (majestic portal)
+        this.drawMajesticExit(exit1, time, false);
 
-        // Bottom world exit (yellow)
-        this.ctx.fillStyle = exit2.color;
-        this.ctx.fillRect(exit2.x, exit2.y, exit2.width, exit2.height);
+        // Bottom world exit (glitched portal)
+        this.drawMajesticExit(exit2, time, true);
 
-        // Add exit labels
-        this.ctx.fillStyle = '#ffffff';
-        this.ctx.font = '10px "Press Start 2P"';
-        this.ctx.fillText('EXIT', exit1.x + 5, exit1.y - 5);
-        this.ctx.fillText('EXIT', exit2.x + 5, exit2.y - 5);
+        // Add portal particles around exits
+        this.drawPortalParticles(exit1, '#ffff00', false);
+        this.drawPortalParticles(exit2, '#ff00ff', true);
 
-        // Draw players
-        this.ctx.fillStyle = this.player1.color;
-        this.ctx.fillRect(this.player1.x, this.player1.y, this.player1.width, this.player1.height);
-
-        // Draw glitched player 2 with effects
+        // Draw players with enhanced visuals
+        this.drawEnhancedPlayer1();
         this.drawGlitchedPlayer();
 
-        // Draw world labels
+        // Draw world labels with glow effects
+        this.ctx.shadowColor = '#00ff00';
+        this.ctx.shadowBlur = 8;
         this.ctx.fillStyle = '#00ff00';
-        this.ctx.font = '16px "Press Start 2P"';
-        this.ctx.fillText('NORMAL WORLD', 10, 30);
-        this.ctx.fillText('GLITCHED WORLD', 10, this.worldHeight + 30);
+        this.ctx.font = '18px "Press Start 2P"';
+        this.ctx.fillText('NORMAL WORLD', 10, 35);
+        this.ctx.fillText('GLITCHED WORLD', 10, this.worldHeight + 35);
+        this.ctx.shadowBlur = 0;
+
+        // Add particle effects
+        this.drawParticleEffects();
 
         // Add glitch effects to bottom world
         this.drawGlitchEffects();
+
+        // Draw transition effects
+        this.drawTransitionEffects();
+    }
+
+    drawTransitionEffects() {
+        if (!this.transitionState.active) return;
+
+        // Draw portal particles
+        for (let particle of this.transitionState.portalParticles) {
+            const alpha = particle.life / 150;
+            this.ctx.fillStyle = particle.color;
+            this.ctx.globalAlpha = alpha;
+            this.ctx.shadowColor = particle.color;
+            this.ctx.shadowBlur = 10;
+            this.ctx.fillRect(particle.x - particle.size / 2, particle.y - particle.size / 2, particle.size, particle.size);
+            this.ctx.shadowBlur = 0;
+        }
+        this.ctx.globalAlpha = 1;
+
+        // Draw screen flash overlay
+        if (this.transitionState.screenFlash > 0) {
+            this.ctx.fillStyle = `rgba(255, 255, 255, ${this.transitionState.screenFlash * 0.8})`;
+            this.ctx.fillRect(0, 0, this.canvasWidth, this.canvasHeight);
+        }
+
+        // Draw dimensional rift effect
+        const riftProgress = this.transitionState.progress;
+        if (riftProgress > 0.2 && riftProgress < 0.8) {
+            const riftIntensity = Math.sin(riftProgress * Math.PI * 4) * 0.5 + 0.5;
+            this.ctx.strokeStyle = `rgba(255, 255, 255, ${riftIntensity * 0.6})`;
+            this.ctx.lineWidth = 3;
+
+            // Draw multiple rift lines
+            for (let i = 0; i < 5; i++) {
+                const y = this.canvasHeight * (0.2 + i * 0.15);
+                this.ctx.beginPath();
+                this.ctx.moveTo(0, y);
+                this.ctx.lineTo(this.canvasWidth, y);
+                this.ctx.stroke();
+            }
+        }
+
+        // Draw level transition text
+        if (riftProgress > 0.4 && riftProgress < 0.6) {
+            this.ctx.fillStyle = '#ffffff';
+            this.ctx.font = 'bold 24px "Press Start 2P"';
+            this.ctx.textAlign = 'center';
+            this.ctx.shadowColor = '#000000';
+            this.ctx.shadowBlur = 10;
+            this.ctx.fillText('DIMENSIONAL SHIFT', this.canvasWidth / 2, this.canvasHeight / 2 - 20);
+            this.ctx.fillText(`LEVEL ${this.currentLevel + 1}`, this.canvasWidth / 2, this.canvasHeight / 2 + 20);
+            this.ctx.shadowBlur = 0;
+            this.ctx.textAlign = 'left';
+        }
+    }
+
+    drawBackgroundStars() {
+        const time = Date.now() * 0.001;
+
+        for (let star of this.stars) {
+            // Update star position
+            star.y += star.speed;
+            if (star.y > this.canvasHeight) {
+                star.y = 0;
+                star.x = Math.random() * this.canvasWidth;
+            }
+
+            // Calculate twinkle effect
+            const twinkle = Math.sin(time + star.twinkle) * 0.5 + 0.5;
+            const alpha = twinkle * 0.8 + 0.2;
+
+            // Draw star
+            this.ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+            this.ctx.fillRect(star.x, star.y, star.size, star.size);
+
+            // Add glow for brighter stars
+            if (star.size > 1.5) {
+                this.ctx.shadowColor = '#ffffff';
+                this.ctx.shadowBlur = 3;
+                this.ctx.fillRect(star.x, star.y, star.size, star.size);
+                this.ctx.shadowBlur = 0;
+            }
+        }
+    }
+
+    drawParticleEffects() {
+        const time = Date.now() * 0.001;
+
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const particle = this.particles[i];
+
+            // Update particle
+            particle.x += particle.vx;
+            particle.y += particle.vy;
+            particle.life--;
+
+            // Remove dead particles
+            if (particle.life <= 0 || particle.x < 0 || particle.x > this.canvasWidth ||
+                particle.y < 0 || particle.y > this.canvasHeight) {
+                this.particles.splice(i, 1);
+                continue;
+            }
+
+            // Draw particle with glow
+            const alpha = particle.life / 150;
+            this.ctx.fillStyle = particle.color;
+            this.ctx.globalAlpha = alpha;
+            this.ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+
+            // Add glow effect
+            this.ctx.shadowColor = particle.color;
+            this.ctx.shadowBlur = 5;
+            this.ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
+            this.ctx.shadowBlur = 0;
+            this.ctx.globalAlpha = 1;
+        }
+
+        // Add new particles occasionally
+        if (Math.random() > 0.95 && this.particles.length < 30) {
+            this.particles.push({
+                x: Math.random() * this.canvasWidth,
+                y: Math.random() * this.canvasHeight,
+                vx: (Math.random() - 0.5) * 0.5,
+                vy: (Math.random() - 0.5) * 0.5,
+                size: Math.random() * 3 + 1,
+                life: Math.random() * 100 + 50,
+                color: ['#00ffff', '#ff00ff', '#ffff00', '#ff8800'][Math.floor(Math.random() * 4)]
+            });
+        }
+    }
+
+    drawEnhancedPlayer1() {
+        // Draw player 1 with gradient and glow
+        const player1Gradient = this.ctx.createLinearGradient(
+            this.player1.x, this.player1.y,
+            this.player1.x + this.player1.width, this.player1.y + this.player1.height
+        );
+        player1Gradient.addColorStop(0, '#00ff88');
+        player1Gradient.addColorStop(1, '#008844');
+        this.ctx.fillStyle = player1Gradient;
+        this.ctx.fillRect(this.player1.x, this.player1.y, this.player1.width, this.player1.height);
+
+        // Add glow effect
+        this.ctx.shadowColor = '#00ff88';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillRect(this.player1.x, this.player1.y, this.player1.width, this.player1.height);
+        this.ctx.shadowBlur = 0;
+
+        // Add highlight
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+        this.ctx.fillRect(this.player1.x + 2, this.player1.y + 2, this.player1.width - 4, 3);
+
+        // Add eyes
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillRect(this.player1.x + 4, this.player1.y + 4, 2, 2);
+        this.ctx.fillRect(this.player1.x + 10, this.player1.y + 4, 2, 2);
     }
 
     drawGlitchedPlayer() {
@@ -553,14 +898,31 @@ class Game {
         const glitchOffset = Math.sin(Date.now() * 0.01) * 2;
         const glitchIntensity = Math.random() > 0.8 ? 3 : 0;
 
-        // Draw main player with glitch offset
-        this.ctx.fillStyle = this.player2.color;
+        // Draw main player with gradient
+        const player2Gradient = this.ctx.createLinearGradient(
+            this.player2.x, this.player2.y,
+            this.player2.x + this.player2.width, this.player2.y + this.player2.height
+        );
+        player2Gradient.addColorStop(0, '#ff00ff');
+        player2Gradient.addColorStop(1, '#800080');
+        this.ctx.fillStyle = player2Gradient;
         this.ctx.fillRect(
             this.player2.x + glitchOffset,
             this.player2.y,
             this.player2.width,
             this.player2.height
         );
+
+        // Add glow effect
+        this.ctx.shadowColor = '#ff00ff';
+        this.ctx.shadowBlur = 10;
+        this.ctx.fillRect(
+            this.player2.x + glitchOffset,
+            this.player2.y,
+            this.player2.width,
+            this.player2.height
+        );
+        this.ctx.shadowBlur = 0;
 
         // Add glitch scanlines
         if (Math.random() > 0.9) {
@@ -569,7 +931,7 @@ class Game {
                 this.player2.x,
                 this.player2.y + Math.random() * this.player2.height,
                 this.player2.width,
-                1
+                2
             );
         }
 
@@ -583,6 +945,11 @@ class Game {
                 this.player2.height
             );
         }
+
+        // Add glitch eyes
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillRect(this.player2.x + 4, this.player2.y + 4, 2, 2);
+        this.ctx.fillRect(this.player2.x + 10, this.player2.y + 4, 2, 2);
     }
 
     drawGlitchEffects() {
@@ -660,6 +1027,153 @@ class Game {
             this.ctx.moveTo(0, this.worldHeight);
             this.ctx.lineTo(this.canvasWidth, this.worldHeight);
             this.ctx.stroke();
+        }
+    }
+
+    drawMajesticExit(exit, time, isGlitched) {
+        const centerX = exit.x + exit.width / 2;
+        const centerY = exit.y + exit.height / 2;
+        const radius = Math.max(exit.width, exit.height) / 2;
+
+        // Draw outer glow ring
+        this.ctx.shadowColor = isGlitched ? '#ff00ff' : '#ffff00';
+        this.ctx.shadowBlur = 20;
+        this.ctx.strokeStyle = isGlitched ? '#ff00ff' : '#ffff00';
+        this.ctx.lineWidth = 3;
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, radius + 10, 0, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.shadowBlur = 0;
+
+        // Draw rotating inner ring
+        this.ctx.save();
+        this.ctx.translate(centerX, centerY);
+        this.ctx.rotate(time * 2);
+        this.ctx.strokeStyle = isGlitched ? '#00ffff' : '#ffffff';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, radius + 5, 0, Math.PI * 1.5);
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        // Draw counter-rotating ring
+        this.ctx.save();
+        this.ctx.translate(centerX, centerY);
+        this.ctx.rotate(-time * 1.5);
+        this.ctx.strokeStyle = isGlitched ? '#ff8800' : '#ffaa00';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.arc(0, 0, radius + 8, Math.PI * 0.5, Math.PI * 2);
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        // Draw main portal body with gradient
+        const gradient = this.ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+        if (isGlitched) {
+            gradient.addColorStop(0, '#ffff00');
+            gradient.addColorStop(0.3, '#ff00ff');
+            gradient.addColorStop(0.7, '#00ffff');
+            gradient.addColorStop(1, '#800080');
+        } else {
+            gradient.addColorStop(0, '#ffffff');
+            gradient.addColorStop(0.3, '#ffff00');
+            gradient.addColorStop(0.7, '#ffaa00');
+            gradient.addColorStop(1, '#ff6600');
+        }
+        this.ctx.fillStyle = gradient;
+        this.ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+
+        // Add pulsing center
+        const pulse = Math.sin(time * 8) * 0.5 + 0.5;
+        this.ctx.fillStyle = `rgba(255, 255, 255, ${pulse * 0.9})`;
+        this.ctx.fillRect(exit.x + 4, exit.y + 4, exit.width - 8, exit.height - 8);
+
+        // Add glitch effects for bottom world
+        if (isGlitched) {
+            if (Math.random() > 0.85) {
+                this.ctx.fillStyle = '#00ffff';
+                this.ctx.fillRect(exit.x, exit.y, exit.width, exit.height);
+            }
+            if (Math.random() > 0.9) {
+                this.ctx.fillStyle = '#ff00ff';
+                this.ctx.fillRect(exit.x + 2, exit.y + 2, exit.width - 4, exit.height - 4);
+            }
+        }
+
+        // Draw portal symbol
+        this.ctx.fillStyle = '#000000';
+        this.ctx.font = '16px "Press Start 2P"';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('⚡', centerX, centerY + 6);
+        this.ctx.textAlign = 'left';
+
+        // Add floating energy orbs
+        for (let i = 0; i < 3; i++) {
+            const angle = time * 2 + (i * Math.PI * 2 / 3);
+            const orbX = centerX + Math.cos(angle) * (radius + 15);
+            const orbY = centerY + Math.sin(angle) * (radius + 15);
+            const orbSize = Math.sin(time * 4 + i) * 2 + 4;
+
+            this.ctx.fillStyle = isGlitched ? '#00ffff' : '#ffff00';
+            this.ctx.shadowColor = isGlitched ? '#00ffff' : '#ffff00';
+            this.ctx.shadowBlur = 8;
+            this.ctx.beginPath();
+            this.ctx.arc(orbX, orbY, orbSize, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.shadowBlur = 0;
+        }
+
+        // Add portal label with enhanced styling
+        this.ctx.shadowColor = '#ffffff';
+        this.ctx.shadowBlur = 8;
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.font = 'bold 14px "Press Start 2P"';
+        this.ctx.textAlign = 'center';
+        this.ctx.fillText('PORTAL', centerX, exit.y - 15);
+        this.ctx.shadowBlur = 0;
+        this.ctx.textAlign = 'left';
+    }
+
+    drawPortalParticles(exit, color, isGlitched) {
+        const centerX = exit.x + exit.width / 2;
+        const centerY = exit.y + exit.height / 2;
+        const time = Date.now() * 0.001;
+
+        // Draw swirling particles
+        for (let i = 0; i < 8; i++) {
+            const angle = time * 3 + (i * Math.PI * 2 / 8);
+            const distance = 25 + Math.sin(time * 5 + i) * 5;
+            const particleX = centerX + Math.cos(angle) * distance;
+            const particleY = centerY + Math.sin(angle) * distance;
+            const size = Math.sin(time * 4 + i) * 1 + 2;
+
+            this.ctx.fillStyle = color;
+            this.ctx.globalAlpha = Math.sin(time * 2 + i) * 0.5 + 0.5;
+            this.ctx.fillRect(particleX - size / 2, particleY - size / 2, size, size);
+        }
+        this.ctx.globalAlpha = 1;
+
+        // Add energy waves
+        const waveCount = 3;
+        for (let i = 0; i < waveCount; i++) {
+            const waveRadius = 20 + Math.sin(time * 2 + i) * 10;
+            this.ctx.strokeStyle = color;
+            this.ctx.lineWidth = 1;
+            this.ctx.globalAlpha = Math.sin(time * 2 + i) * 0.3 + 0.1;
+            this.ctx.beginPath();
+            this.ctx.arc(centerX, centerY, waveRadius, 0, Math.PI * 2);
+            this.ctx.stroke();
+        }
+        this.ctx.globalAlpha = 1;
+
+        // Add glitch particles for bottom world
+        if (isGlitched && Math.random() > 0.8) {
+            for (let i = 0; i < 5; i++) {
+                const glitchX = centerX + (Math.random() - 0.5) * 40;
+                const glitchY = centerY + (Math.random() - 0.5) * 40;
+                this.ctx.fillStyle = '#00ffff';
+                this.ctx.fillRect(glitchX, glitchY, 2, 2);
+            }
         }
     }
 
